@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "f70_automate"              # pip listに表示される名前
+version = "0.1.0"
+dependencies = [
+    "pywin32",              # 必要なライブラリを列挙
+    "streamlit",
+    "pyserial",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
