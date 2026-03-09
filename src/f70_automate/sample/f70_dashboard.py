@@ -2,7 +2,7 @@ import asyncio
 import threading
 import serial
 import streamlit as st
-from f70_automate.f70_serial import f70_operation as f70_safe
+from f70_automate.f70_serial import f70_operation as f70
 from f70_automate.serial_service import SerialService
 
 
@@ -36,7 +36,7 @@ placeholder = st.empty()
 
 @st.fragment(run_every=1 if st.session_state.toggle else None)
 def update_state():
-    status_data = ser.call(f70_safe.read_status)
+    status_data = ser.call(f70.read_status)
 
     st.title("Device Control Dashboard")
 

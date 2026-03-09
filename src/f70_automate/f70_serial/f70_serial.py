@@ -63,10 +63,20 @@ class CRC16_ansi:
 
 
 @dataclasses.dataclass(frozen=True)
-class F70Response:
-	command: str
+class F70Frame:
+	command: F70Command
 	data: tuple[str, ...]
 	crc: CRC16_ansi
+
+	def __str__(self) -> str:
+		buf = chr(0x24) + self.command + ","
+		buf += ",".join(self.data)
+		buf += "," + self.crc.hex
+		return buf
+
+	def as_bytes(self) -> bytes:
+		return str(self).encode(encoding="ascii")
+
 
 @dataclasses.dataclass(frozen=True)
 class F70StatusBits:
@@ -210,7 +220,7 @@ def build_frame(command: F70Command, data: str = "") -> bytes:
 	frame.append(0x0D)  # END (CR)
 	return bytes(frame)
 
-def parse_frame(frame: bytes) -> F70Response:
+def parse_frame(frame: bytes) -> F70Frame:
 	"""Parse protocol frame and return F70Response.
 	Validate start byte, end byte, and CRC-16.
 	"""
@@ -240,13 +250,13 @@ def parse_frame(frame: bytes) -> F70Response:
 		raise ValueError(f"CRC mismatch: received {received_crc.hex}, computed {computed_crc.hex}")
 
 	body = frame[1:-5]  # Command + Data
-	command = body[0:3].decode("ascii")
+	command = F70Command(body[0:3].decode("ascii"))
 	data_str = body[4:-1].decode("ascii")
 	data_list = data_str.split(',') if data_str else []
 
-	return F70Response(command=command, data=tuple(data_list), crc=computed_crc)
+	return F70Frame(command=command, data=tuple(data_list), crc=computed_crc)
 
-def command_read_parse(ser: Serial, command: F70Command, data: str = "") -> F70Response:
+def command_read_parse(ser: Serial, command: F70Command, data: str = "") -> F70Frame:
 	frame = build_frame(command, data)
 	ser.write(frame)
 

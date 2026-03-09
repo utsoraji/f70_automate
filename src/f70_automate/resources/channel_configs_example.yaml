@@ -1,0 +1,18 @@
+channels:
+  - key: ch_pressure
+    label: Pressure
+    unit_id: 1
+    channel_id: 0
+    transform: log10_exp
+    scale: 1.667
+    offset: -9.333
+    unit: Pa
+
+  - key: ch_temperature
+    label: Temperature
+    unit_id: 1
+    channel_id: 1
+    transform: linear
+    scale: 25.0
+    offset: 273.15
+    unit: K

@@ -3,12 +3,13 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "f70_automate"              # pip listに表示される名前
+name = "f70_automate"              # pip list縺ｫ陦ｨ遉ｺ縺輔ｌ繧句錐蜑・
 version = "0.1.0"
 dependencies = [
-    "pywin32",              # 必要なライブラリを列挙
+    "pywin32",              # 蠢・ｦ√↑繝ｩ繧､繝悶Λ繝ｪ繧貞・謖・
     "streamlit",
     "pyserial",
+    "PyYAML",
 ]
 
 [tool.setuptools.packages.find]

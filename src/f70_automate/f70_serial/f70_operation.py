@@ -98,23 +98,23 @@ def _read_version_impl(ser: Serial) -> f70.F70VersionAndElapsedHour:
     return f70.F70VersionAndElapsedHour.from_data(response.data)
 
 
-def _power_on_impl(ser: Serial) -> f70.F70Response:
+def _power_on_impl(ser: Serial) -> f70.F70Frame:
     return f70.command_read_parse(ser, f70.F70Command.PowerOn)
 
 
-def _power_off_impl(ser: Serial) -> f70.F70Response:
+def _power_off_impl(ser: Serial) -> f70.F70Frame:
     return f70.command_read_parse(ser, f70.F70Command.PowerOff)
 
 
-def _coldhead_run_impl(ser: Serial) -> f70.F70Response:
+def _coldhead_run_impl(ser: Serial) -> f70.F70Frame:
     return f70.command_read_parse(ser, f70.F70Command.ColdHeadRun)
 
 
-def _coldhead_pause_impl(ser: Serial) -> f70.F70Response:
+def _coldhead_pause_impl(ser: Serial) -> f70.F70Frame:
     return f70.command_read_parse(ser, f70.F70Command.ColdHeadPause)
 
 
-def _reset_impl(ser: Serial) -> f70.F70Response:
+def _reset_impl(ser: Serial) -> f70.F70Frame:
     return f70.command_read_parse(ser, f70.F70Command.Reset)
 
 
