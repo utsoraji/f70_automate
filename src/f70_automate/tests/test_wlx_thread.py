@@ -7,7 +7,7 @@ from f70_automate.tests.mock.fake_wavelogger import (
     FakeWaveLoggerDocument,
 )
 from f70_automate.domains.wavelogger.channel_config import ChannelConfig, TransformKind
-from f70_automate.domains.wavelogger.wlx_thread import WLXRuntime
+from f70_automate.domains.wavelogger import WLXRuntime
 
 
 def wait_for(predicate, timeout: float = 1.0, interval: float = 0.01) -> None:

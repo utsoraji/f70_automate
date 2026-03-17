@@ -4,7 +4,6 @@ from dataclasses import asdict, dataclass
 from enum import StrEnum
 import math
 from pathlib import Path
-from typing import Any
 
 import yaml
 
@@ -13,6 +12,7 @@ class TransformKind(StrEnum):
     LINEAR = "linear"
     LOG10_EXP = "log10_exp"
 
+ChannelConfigDict = dict[str, str | int | float]
 
 @dataclass(frozen=True)
 class ChannelConfig:
@@ -34,13 +34,13 @@ class ChannelConfig:
             return math.pow(10.0, (self.scale * voltage) + self.offset)
         raise ValueError(f"Unsupported transform: {self.transform}")
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> ChannelConfigDict:
         data = asdict(self)
         data["transform"] = self.transform.value
         return data
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ChannelConfig":
+    def from_dict(cls, data: ChannelConfigDict) -> "ChannelConfig":
         return cls(
             key=str(data["key"]),
             label=str(data["label"]),

@@ -2,14 +2,14 @@ import time
 
 import streamlit as st
 
-import f70_automate.apps.internal.resources as local_resources
-from f70_automate.domains.wavelogger import wlx_thread
+import f70_automate.resources as local_resources
+from f70_automate.domains.wavelogger import WLXRuntime
 
 
 @st.cache_resource(on_release=lambda runtime: runtime.runner.stop())
-def get_wlx_runtime_cached() -> wlx_thread.WLXRuntime:
+def get_wlx_runtime_cached() -> WLXRuntime:
     fixed_file = local_resources.get_path("sequential_capture.xcf")
-    runtime = wlx_thread.WLXRuntime.create(filepath=fixed_file)
+    runtime = WLXRuntime.create(filepath=fixed_file)
     runtime.runner.daemon = True
     return runtime
 

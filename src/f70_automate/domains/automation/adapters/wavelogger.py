@@ -6,8 +6,7 @@ from datetime import datetime
 from typing import Protocol
 
 from f70_automate.domains.automation.monitoring import EventStream, ValueEvent
-from f70_automate.domains.wavelogger.channel_config import ChannelConfig
-from f70_automate.domains.wavelogger.wlx_thread import PhysicalSampleBatch
+from f70_automate.domains.wavelogger import PhysicalSampleBatch, ChannelConfig
 
 
 class PhysicalSamplePublisherLike(Protocol):

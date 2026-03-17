@@ -1,11 +1,13 @@
 from dataclasses import dataclass
 import time
-from typing import cast, TypeAlias
+from typing import Callable, ParamSpec, Protocol, TypeVar, Concatenate, cast
 
 import pandas as pd
 import streamlit as st
 
-import f70_automate.apps.internal.resources as local_resources
+from f70_automate._core.serial.serial_async import SerialPortLike
+from f70_automate._core.serial.serial_service import CallableWithCanExecute
+import f70_automate.resources as local_resources
 from f70_automate.domains.automation.adapters import ChannelValueStream, OperationTrigger
 from f70_automate.domains.automation.conditions import ThresholdBelowCondition
 from f70_automate.domains.automation.monitoring import (
@@ -21,11 +23,25 @@ from f70_automate._core.serial import SerialService
 from f70_automate.tests.mock.fake_serial_f70 import F70Responder
 from f70_automate.tests.mock.fake_serial_service import FakeSerialService
 from f70_automate.tests.mock.fake_wavelogger import FakeWaveLoggerApp, FakeWaveLoggerDocument
-from f70_automate.domains.wavelogger.channel_config import ChannelConfig, read_channel_configs
-from f70_automate.domains.wavelogger.wlx_thread import WLXRuntime
+from f70_automate.domains.wavelogger import WLXRuntime, ChannelConfig, read_channel_configs
 
-SerialLike: TypeAlias = SerialService | FakeSerialService
+P = ParamSpec("P")
+R = TypeVar("R", covariant=True)
 
+class SerialServiceLike(Protocol):
+    @property
+    def is_alive(self) -> bool: ...
+
+    @property
+    def closed(self) -> bool: ...
+
+    def call(self, fn: Callable[Concatenate[SerialPortLike, P], R], *a: P.args, **kw: P.kwargs) -> R: ...
+
+    __call__ = call
+
+    def call_checked(self, operation: CallableWithCanExecute[P, R]) -> R: ...
+
+    def shutdown(self) -> None: ...
 
 @dataclass
 class DashboardState:
@@ -68,7 +84,7 @@ def automation_ready(
 
 
 def load_dashboard_channels() -> tuple[ChannelConfig, ...]:
-    channels = read_channel_configs(local_resources.get_path("channel_configs_example.yaml"))
+    channels = read_channel_configs(local_resources.get_path("channel_configs.yaml"))
     if not channels:
         raise ValueError("At least one WaveLogger channel must be configured.")
     return channels
@@ -76,6 +92,7 @@ def load_dashboard_channels() -> tuple[ChannelConfig, ...]:
 
 WAVELOGGER_CHANNELS = load_dashboard_channels()
 AUTOMATION_OPERATIONS = (
+    f70_op.no_op,
     f70_op.power_on,
     f70_op.power_off,
     f70_op.coldhead_run,
@@ -91,7 +108,7 @@ TRACE_WINDOWS = {
 }
 
 @st.cache_resource(on_release=lambda svc: svc.shutdown())
-def get_serial_service(port: str, baudrate: int, use_mock: bool) -> SerialLike:
+def get_serial_service(port: str, baudrate: int, use_mock: bool) -> SerialServiceLike:
     if use_mock:
         responder = F70Responder(
             system_on=False,
@@ -127,7 +144,7 @@ def get_wlx_runtime(use_mock: bool) -> WLXRuntime:
     runtime.runner.daemon = True
     return runtime
 
-def read_f70_status(service: SerialLike):
+def read_f70_status(service: SerialServiceLike):
     return service.call(f70_op.read_status)
 
 
@@ -138,6 +155,9 @@ def stop_wave_logger(runtime: WLXRuntime, monitor_runner: ThreadedMonitorRunner 
         runtime.runner.stop()
         runtime.runner.join(timeout=1.0)
 
+def stop_monitor_runner( monitor_runner: ThreadedMonitorRunner | None = None) -> None:
+    if monitor_runner is not None:
+        monitor_runner.stop()
 
 def reset_serial_service(port: str, baudrate: int, use_mock: bool) -> None:
     try:
@@ -163,7 +183,7 @@ def reconnect_f70(
     baudrate: int,
     use_mock: bool,
     monitor_runner: ThreadedMonitorRunner | None = None,
-) -> SerialLike | None:
+) -> SerialServiceLike | None:
     if monitor_runner is not None:
         monitor_runner.stop()
     reset_serial_service(port, baudrate, use_mock)
@@ -226,7 +246,7 @@ def main() -> None:
         "automation_settings",
         AutomationSettings(
             channels=WAVELOGGER_CHANNELS,
-            operation_name=f70_op.power_on.name,
+            operation_name=f70_op.no_op.name,
         ),
     )
     st.session_state.setdefault("monitor_runner", None)
@@ -247,8 +267,7 @@ def main() -> None:
     if st.session_state.last_mode is None:
         st.session_state.last_mode = use_mock
     elif st.session_state.last_mode != use_mock:
-        if monitor_runner is not None:
-            monitor_runner.stop()
+        stop_monitor_runner(monitor_runner)
         reset_serial_service("MOCK" if st.session_state.last_mode else "COM3", 9600, st.session_state.last_mode)
         reset_wave_logger(st.session_state.last_mode, monitor_runner)
         state.f70_connected = False
@@ -329,11 +348,7 @@ def main() -> None:
 
     state.f70_connected = bool(service and service.is_alive and not service.closed)
     state.wave_running = bool(runtime and runtime.runner.is_alive())
-    if (not monitor_snapshot.is_running) and (monitor_runner is not None):
-        monitor_runner.stop()
-        st.session_state.monitor_runner = None
-        monitor_runner = None
-        monitor_snapshot = get_monitor_snapshot(None)
+    monitor_snapshot = get_monitor_snapshot(monitor_runner)
     ready_for_automation, ready_reason = automation_ready(state)
 
     top_col1, top_col2, top_col3 = st.columns(3)
@@ -342,9 +357,10 @@ def main() -> None:
         with st.container(border=True):
             st.subheader("F70 Serial")
             st.metric("Connection", "Connected" if state.f70_connected else "Disconnected")
-            if st.button("Reconnect", use_container_width=True, disabled=monitor_snapshot.is_running):
+            if st.button("Reconnect", width='stretch', disabled=monitor_snapshot.is_running):
                 service = reconnect_f70(state, port, int(baudrate), use_mock, monitor_runner)
                 if service is not None:
+                    stop_monitor_runner(monitor_runner)
                     st.session_state.monitor_runner = None
                     st.rerun()
             st.caption(f"Port: {port}")
@@ -355,7 +371,8 @@ def main() -> None:
             st.subheader("WaveLogger")
             st.metric("Acquisition", "Running" if state.wave_running else "Stopped")
             wave_action_label = "Stop Acquire" if state.wave_running else "Start Acquire"
-            if st.button(wave_action_label, use_container_width=True):
+            if st.button(wave_action_label, width='stretch'):
+                stop_monitor_runner(monitor_runner)
                 if state.wave_running:
                     stop_wave_acquisition(state, use_mock, monitor_runner)
                     st.session_state.monitor_runner = None
@@ -381,12 +398,11 @@ def main() -> None:
             automation_label = "Automation OFF" if monitor_snapshot.is_running else "Automation ON"
             if st.button(
                 automation_label,
-                use_container_width=True,
+                width='stretch',
                 disabled=(not monitor_snapshot.is_running) and (not ready_for_automation),
             ):
                 if monitor_snapshot.is_running:
-                    if monitor_runner is not None:
-                        monitor_runner.stop()
+                    stop_monitor_runner(monitor_runner)
                     st.session_state.monitor_runner = None
                     st.rerun()
                 else:
@@ -425,7 +441,7 @@ def main() -> None:
 
     @st.fragment(run_every=1)
     def live_view() -> None:
-        current_service: SerialLike | None
+        current_service: SerialServiceLike | None
         current_runtime: WLXRuntime | None
         try:
             current_service = get_serial_service(port, int(baudrate), use_mock)
@@ -440,10 +456,6 @@ def main() -> None:
         state.wave_running = bool(current_runtime and current_runtime.runner.is_alive())
         live_monitor_runner = cast(ThreadedMonitorRunner | None, st.session_state.monitor_runner)
         live_snapshot = get_monitor_snapshot(live_monitor_runner)
-        if (not live_snapshot.is_running) and (live_monitor_runner is not None):
-            live_monitor_runner.stop()
-            st.session_state.monitor_runner = None
-            live_snapshot = get_monitor_snapshot(None)
         selected_live_channel = settings.selected_channel
         latest_live_value = None
         if current_runtime and current_runtime.runner.is_alive():
@@ -456,7 +468,7 @@ def main() -> None:
             c1.metric("F70", "Connected" if state.f70_connected else "Disconnected")
             c2.metric("WaveLogger", "Running" if state.wave_running else "Stopped")
             c3.metric("Automation", "RUNNING" if live_snapshot.is_running else "STOPPED")
-            c4.metric("Trigger Count", live_snapshot.trigger_count)
+            c4.metric("Last Triggered", live_snapshot.last_trigger_time.strftime("%Y-%m-%d %H:%M:%S") if live_snapshot.last_trigger_time else "N/A")
             c5, c6 = st.columns(2)
             c5.metric(
                 f"Latest {selected_live_channel.label}",
@@ -528,7 +540,7 @@ def main() -> None:
                     latest_cols = st.columns(len(WAVELOGGER_CHANNELS))
                     for col, channel in zip(latest_cols, WAVELOGGER_CHANNELS):
                         value = current_runtime.store.get_current_physical(channel)
-                        col.metric(channel.label, "N/A" if value is None else f"{value:.6g} {channel.unit}")
+                        col.metric(channel.label, "N/A" if value is None else f"{value:.3E} {channel.unit}")
                     chart_cols = st.columns(len(WAVELOGGER_CHANNELS))
                     for col, channel in zip(chart_cols, WAVELOGGER_CHANNELS):
                         with col:
@@ -537,7 +549,7 @@ def main() -> None:
                             if history:
                                 st.line_chart(
                                     pd.DataFrame({channel.label: history}),
-                                    use_container_width=True,
+                                    width='stretch',
                                 )
                             else:
                                 st.info(f"{channel.label} has no samples yet.")

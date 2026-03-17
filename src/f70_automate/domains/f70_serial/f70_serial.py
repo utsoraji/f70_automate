@@ -1,7 +1,7 @@
 from enum import IntEnum, StrEnum
 import dataclasses
 
-from serial import Serial
+from f70_automate._core.serial import SerialPortLike
 
 class F70Command(StrEnum):
 	ReadAllTemps = "TEA"
@@ -256,13 +256,13 @@ def parse_frame(frame: bytes) -> F70Frame:
 
 	return F70Frame(command=command, data=tuple(data_list), crc=computed_crc)
 
-def command_read_parse(ser: Serial, command: F70Command, data: str = "") -> F70Frame:
+def command_read_parse(ser: SerialPortLike, command: F70Command, data: str = "") -> F70Frame:
 	frame = build_frame(command, data)
 	ser.write(frame)
 
 	# read while 0x0D not received, then parse frame
 	response_bytes = ser.read_until(expected=b'\r', size=256)
-	print(f"Received frame: {response_bytes}")
+	# print(f"Received frame: {response_bytes}")
 
 	if not response_bytes:
 		raise TimeoutError("No response received")

@@ -8,14 +8,13 @@ from f70_automate._core.serial import SerialService
 
 
 
-@st.cache_resource
+@st.cache_resource(on_release=lambda service: service.close())
 def get_serial_service_cached() -> SerialService:
     """
-    シリアルサービスを生成して返す。Streamlitのキャッシュ機能を利用して、セッションごとに1つのインスタンスを保持。
+    シリアルサービスを生成して返す。Streamlitのキャッシュ機能を利用して1つのインスタンスを保持。
     """
-    loop = asyncio.new_event_loop()
     ser = serial.Serial("COM3", 9600)
-    service = SerialService(ser, loop)
+    service = SerialService(ser)
 
     return service
 

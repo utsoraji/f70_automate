@@ -1,23 +1,40 @@
 import asyncio
-import serial
-from typing import Callable, Any, Concatenate, ParamSpec, TypeVar
+from types import TracebackType
+from typing import Callable, Concatenate, ParamSpec, Protocol, TypeVar
 
-T = TypeVar("T")
+class SerialPortLike(Protocol):
+	"""
+	A minimal protocol representing the serial port interface needed by SerialAsyncManager.
+	Based on pyserial's Serial class, but only includes the methods we actually use.
+	"""
+	def write(self, b: bytes, /) -> int | None: ...
+	def read_until(self, expected: bytes = b"\r", size: int = 256) -> bytes: ...
+	def close(self) -> None: ...
+	@property
+	def is_open(self) -> bool: ...
+	@property
+	def port(self) -> str | None: ...
+	@property
+	def baudrate(self) -> int: ...
+	
 P = ParamSpec("P")
+R = TypeVar("R", covariant=True)
 
-class _Command[T]:
-	def __init__(self,  func: Callable[Concatenate[serial.Serial, P], T], *args: P.args, **kwargs: P.kwargs):
+CommandFunc = Callable[Concatenate[SerialPortLike, P], R]
+
+class _Command[R]:
+	def __init__(self,  func: CommandFunc[P, R], *args: P.args, **kwargs: P.kwargs):
 		self._func = func
 		self._args = args
 		self._kwargs = kwargs
 
-	def __call__(self, ser: serial.Serial) -> Any:
+	def __call__(self, ser: SerialPortLike) -> R:
 		return self._func(ser, *self._args, **self._kwargs)
 
-class SerialAsyncManager:
-	def __init__(self, ser: serial.Serial, default_timeout: float = 10.0) -> None:
-		self._ser: serial.Serial = ser
-		self._queue: asyncio.Queue[tuple[Callable[[serial.Serial], Any], asyncio.Future]] = asyncio.Queue()
+class SerialAsyncManager[R]:
+	def __init__(self, ser: SerialPortLike, default_timeout: float = 10.0) -> None:
+		self._ser: SerialPortLike = ser
+		self._queue: asyncio.Queue[tuple[_Command[R], asyncio.Future[R]]] = asyncio.Queue()
 		self._stop_event = asyncio.Event()
 		self._worker_task = None
 		self.default_timeout = default_timeout
@@ -27,7 +44,7 @@ class SerialAsyncManager:
 		self._worker_task = asyncio.create_task(self._worker())
 		return self
 
-	async def __aexit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any) -> None:
+	async def __aexit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: TracebackType | None) -> None:
 		"""async with 終了時に自動で安全停止・クローズ"""
 		await self.stop()
 
@@ -64,15 +81,15 @@ class SerialAsyncManager:
 
 	async def run_task(
 		self,
-		func: Callable[Concatenate[serial.Serial, P], T]
+		func: CommandFunc[P, R]
 		, *args: P.args, **kwargs: P.kwargs
-	) -> T:
+	) -> R:
 		"""
 		外部から通信タスク（read_status等）を依頼する。必ずtimeoutでロック回避（デフォルトはインスタンス設定値）
 		"""
 		if self._stop_event.is_set():
 			raise RuntimeError("Manager is stopping or stopped.")
-
+		
 		future = asyncio.get_running_loop().create_future()
 		await self._queue.put((_Command(func, *args, **kwargs), future))
 		return await asyncio.wait_for(future, timeout=self.default_timeout)

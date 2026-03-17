@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable
+from typing import Callable, ParamSpec, TypeVar, Concatenate
 
-from serial import Serial
-
+from f70_automate._core.serial import SerialPortLike
+from f70_automate._core.serial.serial_service import CallableWithCanExecute
 from f70_automate.domains.f70_serial import f70_serial as f70
 
 
@@ -14,19 +14,22 @@ class CheckCommand(Enum):
     NONE = "none"
     STATUS = "status"
 
+P = ParamSpec("P")
+R = TypeVar("R", covariant=True)
+
 
 @dataclass(frozen=True)
-class F70Operation:
+class F70Operation(CallableWithCanExecute[P, R]):
     name: str
-    execute: Callable[..., Any]
+    execute: Callable[Concatenate[SerialPortLike, P], R]
     mutates_state: bool
     check_command: CheckCommand = CheckCommand.NONE
     check_predicate: CheckPredicate | None = None
 
-    def __call__(self, ser: Serial, *args: Any, **kwargs: Any) -> Any:
+    def __call__(self, ser: SerialPortLike, *args: P.args, **kwargs: P.kwargs) -> R:
         return self.execute(ser, *args, **kwargs)
 
-    def can_execute(self, ser: Serial) -> bool:
+    def can_execute(self, ser: SerialPortLike) -> bool:
         if self.check_command is CheckCommand.NONE:
             return True
         if self.check_command is CheckCommand.STATUS:
@@ -36,7 +39,7 @@ class F70Operation:
             return self.check_predicate(status)
         raise ValueError(f"Unsupported check_command: {self.check_command}")
 
-def _read_temperature_impl(ser: Serial, sensor_id: int) -> float:
+def _read_temperature_impl(ser: SerialPortLike, sensor_id: int) -> float:
     match sensor_id:
         case 1:
             command = f70.F70Command.ReadTemp1
@@ -55,14 +58,14 @@ def _read_temperature_impl(ser: Serial, sensor_id: int) -> float:
     return float(response.data[0])
 
 
-def _read_all_temperatures_impl(ser: Serial) -> list[float]:
+def _read_all_temperatures_impl(ser: SerialPortLike) -> list[float]:
     response = f70.command_read_parse(ser, f70.F70Command.ReadAllTemps)
     if not response.data:
         raise ValueError("No temperature data in response")
     return [float(x) for x in response.data]
 
 
-def _read_pressure_impl(ser: Serial, sensor_id: int = 0) -> float:
+def _read_pressure_impl(ser: SerialPortLike, sensor_id: int = 0) -> float:
     match sensor_id:
         case 1:
             command = f70.F70Command.ReadPressure1
@@ -77,43 +80,43 @@ def _read_pressure_impl(ser: Serial, sensor_id: int = 0) -> float:
     return float(response.data[0])
 
 
-def _read_all_pressures_impl(ser: Serial) -> list[float]:
+def _read_all_pressures_impl(ser: SerialPortLike) -> list[float]:
     response = f70.command_read_parse(ser, f70.F70Command.ReadAllPressures)
     if not response.data:
         raise ValueError("No pressure data in response")
     return [float(x) for x in response.data]
 
 
-def _read_status_impl(ser: Serial) -> f70.F70StatusBits:
+def _read_status_impl(ser: SerialPortLike) -> f70.F70StatusBits:
     response = f70.command_read_parse(ser, f70.F70Command.ReadStatesBits)
     if not response.data:
         raise ValueError("No status data in response")
     return f70.F70StatusBits(response.data[0])
 
 
-def _read_version_impl(ser: Serial) -> f70.F70VersionAndElapsedHour:
+def _read_version_impl(ser: SerialPortLike) -> f70.F70VersionAndElapsedHour:
     response = f70.command_read_parse(ser, f70.F70Command.ReadVersionAndElapsedHour)
     if not response.data:
         raise ValueError("No version data in response")
     return f70.F70VersionAndElapsedHour.from_data(response.data)
 
-def _power_on_impl(ser: Serial) -> f70.F70Frame:
+def _power_on_impl(ser: SerialPortLike) -> f70.F70Frame:
     return f70.command_read_parse(ser, f70.F70Command.PowerOn)
 
 
-def _power_off_impl(ser: Serial) -> f70.F70Frame:
+def _power_off_impl(ser: SerialPortLike) -> f70.F70Frame:
     return f70.command_read_parse(ser, f70.F70Command.PowerOff)
 
 
-def _coldhead_run_impl(ser: Serial) -> f70.F70Frame:
+def _coldhead_run_impl(ser: SerialPortLike) -> f70.F70Frame:
     return f70.command_read_parse(ser, f70.F70Command.ColdHeadRun)
 
 
-def _coldhead_pause_impl(ser: Serial) -> f70.F70Frame:
+def _coldhead_pause_impl(ser: SerialPortLike) -> f70.F70Frame:
     return f70.command_read_parse(ser, f70.F70Command.ColdHeadPause)
 
 
-def _reset_impl(ser: Serial) -> f70.F70Frame:
+def _reset_impl(ser: SerialPortLike) -> f70.F70Frame:
     return f70.command_read_parse(ser, f70.F70Command.Reset)
 
 read_temperature = F70Operation(
@@ -197,6 +200,15 @@ reset = F70Operation(
     check_command=CheckCommand.STATUS,
 )
 
+def no_op_impl(ser: SerialPortLike) -> None:
+    print("Executing no_op - this does nothing.")
+
+no_op = F70Operation(
+    name="no_op",
+    execute=no_op_impl,
+    mutates_state=False,
+)
+
 
 OPERATIONS: dict[str, F70Operation] = {
     op.name: op
@@ -215,3 +227,16 @@ OPERATIONS: dict[str, F70Operation] = {
         reset,
     )
 }
+
+
+async def main():
+    import serial
+    from f70_automate._core.serial.serial_async import SerialAsyncManager
+    serial = SerialAsyncManager(serial.Serial("COM3", baudrate=9600, timeout=1.0))
+    await serial.start()
+
+    await serial.run_task(read_status)
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())

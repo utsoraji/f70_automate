@@ -1,12 +1,18 @@
 import asyncio
 import threading
 from concurrent.futures import TimeoutError as FutureTimeoutError
-from typing import Any, Callable
+from typing import Any, Callable, Concatenate, ParamSpec, Protocol, TypeVar
 
 import serial
 
-from f70_automate._core.serial import serial_async
+from f70_automate._core.serial import serial_async, SerialPortLike
 
+P = ParamSpec("P")
+R = TypeVar("R", covariant=True)
+
+class CallableWithCanExecute(Protocol[P, R]):
+    def __call__(self, ser: SerialPortLike, *args: P.args, **kwds: P.kwargs) -> R: ...
+    def can_execute(self, ser: SerialPortLike) -> bool: ...
 
 class SerialServiceError(RuntimeError):
     pass
@@ -15,11 +21,10 @@ class SerialServiceError(RuntimeError):
 class SerialServiceTimeoutError(TimeoutError, SerialServiceError):
     pass
 
-
 class SerialService:
     def __init__(
         self,
-        ser: serial.Serial,
+        ser: SerialPortLike,
         loop: asyncio.AbstractEventLoop | None = None,
         *,
         default_timeout: float = 10.0,
@@ -95,7 +100,7 @@ class SerialService:
     def baudrate(self) -> int:
         return int(self._port.baudrate)
 
-    def call(self, fn: Callable[..., Any], *a: Any, timeout: float | None = None, **kw: Any) -> Any:
+    def call(self, fn: Callable[Concatenate[SerialPortLike, P], R], *a: P.args, **kw: P.kwargs) -> R:
         if self._closed:
             raise RuntimeError("SerialService is closed.")
 
@@ -105,12 +110,12 @@ class SerialService:
             running = None
         if running is self._loop:
             raise RuntimeError("SerialService.call() called from actor loop thread.")
-
+        
         fut = asyncio.run_coroutine_threadsafe(
             self._actor.run_task(fn, *a, **kw),
             self._loop,
         )
-        wait_timeout = self._default_timeout if timeout is None else timeout
+        wait_timeout = self._default_timeout
         try:
             return fut.result(timeout=wait_timeout)
         except FutureTimeoutError as exc:
@@ -121,19 +126,19 @@ class SerialService:
 
     __call__ = call
 
-    def call_checked(self, op: Any, *a: Any, timeout: float | None = None, **kw: Any) -> Any:
-        if not callable(op):
-            raise TypeError("op must be callable.")
-        if not hasattr(op, "can_execute"):
-            raise TypeError("op must implement can_execute(ser).")
+    def call_checked(self, operation: CallableWithCanExecute[P,R], *a: P.args, **kw: P.kwargs) -> R:
+        if not callable(operation):
+            raise TypeError("operation must be callable.")
+        if not hasattr(operation, "can_execute"):
+            raise TypeError("operation must implement can_execute(ser).")
 
-        def _checked_runner(ser: serial.Serial, operation: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        def _checked_runner(ser: SerialPortLike, operation: CallableWithCanExecute, *args: P.args, **kwargs: P.kwargs) -> R:
             if not operation.can_execute(ser):
                 op_name = getattr(operation, "name", repr(operation))
                 raise RuntimeError(f"Operation '{op_name}' cannot execute in current state.")
             return operation(ser, *args, **kwargs)
 
-        return self.call(_checked_runner, op, a, kw, timeout=timeout)
+        return self.call(_checked_runner, operation, *a, **kw)
 
     def close(self) -> None:
         self.shutdown()

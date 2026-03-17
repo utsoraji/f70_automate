@@ -215,7 +215,7 @@ class WaveLoggerApp:
 
 # --- 使用例 ---
 if __name__ == "__main__":
-	import f70_automate.apps.internal.resources as local_resources
+	import f70_automate.resources as local_resources
 	FILE = local_resources.get_path("sequential_capture.xcf")
 	with WaveLoggerApp(visible=True) as app:
 		app.connector.setup_usb(device_id=0)
