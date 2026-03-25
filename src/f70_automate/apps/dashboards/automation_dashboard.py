@@ -1,104 +1,38 @@
-from dataclasses import dataclass
-import time
-from typing import Callable, ParamSpec, Protocol, TypeVar, Concatenate, cast
+from typing import cast
 
 import pandas as pd
 import streamlit as st
 
-from f70_automate._core.serial.serial_async import SerialPortLike
-from f70_automate._core.serial.serial_service import CallableWithCanExecute
+from f70_automate.apps.controller.automation_usecase import (
+    DashboardState,
+    SerialServiceLike,
+    action_mode_changed,
+    action_toggle_automation,
+    action_toggle_wave,
+    automation_ready,
+    format_monitor_error,
+    format_trigger_result,
+    get_active_alarm_names,
+    get_automation_operations,
+    get_monitor_snapshot,
+    load_automation_channels,
+    read_f70_status,
+    reconnect_f70,
+)
 import f70_automate.resources as local_resources
-from f70_automate.domains.automation.adapters import ChannelValueStream, OperationTrigger
-from f70_automate.domains.automation.conditions import ThresholdBelowCondition
 from f70_automate.domains.automation.monitoring import (
-    MonitorSession,
-    MonitorSpec,
-    MonitorSnapshot,
     ThreadedMonitorRunner,
 )
 from f70_automate.domains.automation.settings import AutomationSettings
-from f70_automate.domains.f70_serial import f70_operation as f70_op
-from f70_automate.domains.f70_serial.f70_operation import F70Operation
 from f70_automate._core.serial import SerialService
 from f70_automate.tests.mock.fake_serial_f70 import F70Responder
 from f70_automate.tests.mock.fake_serial_service import FakeSerialService
 from f70_automate.tests.mock.fake_wavelogger import FakeWaveLoggerApp, FakeWaveLoggerDocument
-from f70_automate.domains.wavelogger import WLXRuntime, ChannelConfig, read_channel_configs
-
-P = ParamSpec("P")
-R = TypeVar("R", covariant=True)
-
-class SerialServiceLike(Protocol):
-    @property
-    def is_alive(self) -> bool: ...
-
-    @property
-    def closed(self) -> bool: ...
-
-    def call(self, fn: Callable[Concatenate[SerialPortLike, P], R], *a: P.args, **kw: P.kwargs) -> R: ...
-
-    __call__ = call
-
-    def call_checked(self, operation: CallableWithCanExecute[P, R]) -> R: ...
-
-    def shutdown(self) -> None: ...
-
-@dataclass
-class DashboardState:
-    f70_connected: bool = False
-    wave_running: bool = False
-    last_error: str | None = None
-    blocked_reason: str | None = None
+from f70_automate.domains.wavelogger import WLXRuntime
 
 
-def get_monitor_snapshot(
-    monitor_runner: ThreadedMonitorRunner | None,
-) -> MonitorSnapshot:
-    if monitor_runner is None:
-        return MonitorSnapshot(is_running=False)
-    return monitor_runner.snapshot()
-
-
-def format_trigger_result(result: object | None) -> str:
-    if result is None:
-        return "N/A"
-    if isinstance(result, F70Operation):
-        return result.name
-    return str(result)
-
-
-def format_monitor_error(error: Exception | None) -> str | None:
-    if error is None:
-        return None
-    return str(error)
-
-
-def automation_ready(
-    dashboard_state: DashboardState,
-) -> tuple[bool, str | None]:
-    if not dashboard_state.f70_connected:
-        return False, "Reconnect F70 first."
-    if not dashboard_state.wave_running:
-        return False, "Start WaveLogger acquisition first."
-    return True, None
-
-
-def load_dashboard_channels() -> tuple[ChannelConfig, ...]:
-    channels = read_channel_configs(local_resources.get_path("channel_configs.yaml"))
-    if not channels:
-        raise ValueError("At least one WaveLogger channel must be configured.")
-    return channels
-
-
-WAVELOGGER_CHANNELS = load_dashboard_channels()
-AUTOMATION_OPERATIONS = (
-    f70_op.no_op,
-    f70_op.power_on,
-    f70_op.power_off,
-    f70_op.coldhead_run,
-    f70_op.coldhead_pause,
-    f70_op.reset,
-)
+WAVELOGGER_CHANNELS = load_automation_channels(local_resources.get_path("channel_configs.yaml"))
+AUTOMATION_OPERATIONS = get_automation_operations()
 TRACE_WINDOWS = {
     "1 min": 60,
     "5 min": 5 * 60,
@@ -144,95 +78,6 @@ def get_wlx_runtime(use_mock: bool) -> WLXRuntime:
     runtime.runner.daemon = True
     return runtime
 
-def read_f70_status(service: SerialServiceLike):
-    return service.call(f70_op.read_status)
-
-
-def stop_wave_logger(runtime: WLXRuntime, monitor_runner: ThreadedMonitorRunner | None = None) -> None:
-    if monitor_runner is not None:
-        monitor_runner.stop()
-    if runtime.runner.is_alive():
-        runtime.runner.stop()
-        runtime.runner.join(timeout=1.0)
-
-def stop_monitor_runner( monitor_runner: ThreadedMonitorRunner | None = None) -> None:
-    if monitor_runner is not None:
-        monitor_runner.stop()
-
-def reset_serial_service(port: str, baudrate: int, use_mock: bool) -> None:
-    try:
-        service = get_serial_service(port, baudrate, use_mock)
-        service.shutdown()
-    except Exception:
-        pass
-    get_serial_service.clear()
-
-
-def reset_wave_logger(use_mock: bool, monitor_runner: ThreadedMonitorRunner | None = None) -> None:
-    try:
-        runtime = get_wlx_runtime(use_mock)
-        stop_wave_logger(runtime, monitor_runner)
-    except Exception:
-        pass
-    get_wlx_runtime.clear()
-
-
-def reconnect_f70(
-    dashboard_state: DashboardState,
-    port: str,
-    baudrate: int,
-    use_mock: bool,
-    monitor_runner: ThreadedMonitorRunner | None = None,
-) -> SerialServiceLike | None:
-    if monitor_runner is not None:
-        monitor_runner.stop()
-    reset_serial_service(port, baudrate, use_mock)
-    try:
-        service = get_serial_service(port, baudrate, use_mock)
-        read_f70_status(service)
-        dashboard_state.f70_connected = True
-        dashboard_state.last_error = None
-        dashboard_state.blocked_reason = None
-        return service
-    except Exception as exc:
-        dashboard_state.f70_connected = False
-        dashboard_state.last_error = f"F70 reconnect failed: {exc}"
-        dashboard_state.blocked_reason = "F70 is disconnected."
-        return None
-
-
-def start_wave_acquisition(
-    dashboard_state: DashboardState,
-    settings: AutomationSettings,
-    use_mock: bool,
-    monitor_runner: ThreadedMonitorRunner | None = None,
-) -> WLXRuntime | None:
-    reset_wave_logger(use_mock, monitor_runner)
-    try:
-        runtime = get_wlx_runtime(use_mock)
-        runtime.runner.start()
-        while runtime.store.get_current_physical(settings.selected_channel) is None and runtime.runner.is_alive():
-            time.sleep(0.1)
-        runtime.store.check_exception()
-        dashboard_state.wave_running = True
-        dashboard_state.last_error = None
-        dashboard_state.blocked_reason = None
-        return runtime
-    except Exception as exc:
-        dashboard_state.wave_running = False
-        dashboard_state.last_error = f"WaveLogger start failed: {exc}"
-        dashboard_state.blocked_reason = "WaveLogger acquisition failed."
-        return None
-
-
-def stop_wave_acquisition(
-    dashboard_state: DashboardState,
-    use_mock: bool,
-    monitor_runner: ThreadedMonitorRunner | None = None,
-) -> None:
-    reset_wave_logger(use_mock, monitor_runner)
-    dashboard_state.wave_running = False
-
 
 def main() -> None:
     st.set_page_config(page_title="F70 Automation Dashboard", layout="wide")
@@ -246,7 +91,7 @@ def main() -> None:
         "automation_settings",
         AutomationSettings(
             channels=WAVELOGGER_CHANNELS,
-            operation_name=f70_op.no_op.name,
+            operation_name=AUTOMATION_OPERATIONS[0].name,
         ),
     )
     st.session_state.setdefault("monitor_runner", None)
@@ -267,11 +112,14 @@ def main() -> None:
     if st.session_state.last_mode is None:
         st.session_state.last_mode = use_mock
     elif st.session_state.last_mode != use_mock:
-        stop_monitor_runner(monitor_runner)
-        reset_serial_service("MOCK" if st.session_state.last_mode else "COM3", 9600, st.session_state.last_mode)
-        reset_wave_logger(st.session_state.last_mode, monitor_runner)
-        state.f70_connected = False
-        state.wave_running = False
+        action_mode_changed(
+            state=state,
+            resolve_stale_service=lambda: get_serial_service("MOCK" if st.session_state.last_mode else "COM3", 9600, st.session_state.last_mode),
+            clear_service_cache=get_serial_service.clear,
+            resolve_stale_runtime=lambda: get_wlx_runtime(st.session_state.last_mode),
+            clear_runtime_cache=get_wlx_runtime.clear,
+            monitor_runner=monitor_runner,
+        )
         st.session_state.monitor_runner = None
         st.session_state.last_mode = use_mock
 
@@ -358,11 +206,14 @@ def main() -> None:
             st.subheader("F70 Serial")
             st.metric("Connection", "Connected" if state.f70_connected else "Disconnected")
             if st.button("Reconnect", width='stretch', disabled=monitor_snapshot.is_running):
-                service = reconnect_f70(state, port, int(baudrate), use_mock, monitor_runner)
-                if service is not None:
-                    stop_monitor_runner(monitor_runner)
-                    st.session_state.monitor_runner = None
-                    st.rerun()
+                reconnect_f70(
+                    dashboard_state=state,
+                    resolve_service=lambda: get_serial_service(port, int(baudrate), use_mock),
+                    clear_service_cache=get_serial_service.clear,
+                    monitor_runner=monitor_runner,
+                )
+                st.session_state.monitor_runner = None
+                st.rerun()
             st.caption(f"Port: {port}")
             st.caption(f"Baudrate: {int(baudrate)}")
 
@@ -372,17 +223,15 @@ def main() -> None:
             st.metric("Acquisition", "Running" if state.wave_running else "Stopped")
             wave_action_label = "Stop Acquire" if state.wave_running else "Start Acquire"
             if st.button(wave_action_label, width='stretch'):
-                stop_monitor_runner(monitor_runner)
-                if state.wave_running:
-                    stop_wave_acquisition(state, use_mock, monitor_runner)
-                    st.session_state.monitor_runner = None
-                    runtime = None
-                    st.rerun()
-                else:
-                    runtime = start_wave_acquisition(state, settings, use_mock, monitor_runner)
-                    st.session_state.monitor_runner = None
-                    if runtime is not None:
-                        st.rerun()
+                action_toggle_wave(
+                    state=state,
+                    settings=settings,
+                    resolve_runtime=lambda: get_wlx_runtime(use_mock),
+                    clear_runtime_cache=get_wlx_runtime.clear,
+                    monitor_runner=monitor_runner,
+                )
+                st.session_state.monitor_runner = None
+                st.rerun()
             latest_value = None
             if runtime and runtime.runner.is_alive():
                 latest_value = runtime.store.get_current_physical(selected_channel)
@@ -401,38 +250,15 @@ def main() -> None:
                 width='stretch',
                 disabled=(not monitor_snapshot.is_running) and (not ready_for_automation),
             ):
-                if monitor_snapshot.is_running:
-                    stop_monitor_runner(monitor_runner)
-                    st.session_state.monitor_runner = None
-                    st.rerun()
-                else:
-                    if service is None or runtime is None:
-                        state.blocked_reason = "Reconnect F70 and start WaveLogger acquisition first."
-                        st.rerun()
-                    else:
-                        spec = MonitorSpec(
-                            condition=ThresholdBelowCondition(
-                                threshold=float(settings.threshold),
-                                cooldown_sec=float(settings.cooldown_sec),
-                                required_sample_count=int(settings.required_sample_count),
-                            ),
-                            trigger=OperationTrigger(
-                                service=service,
-                                operation=op,
-                            ),
-                            max_trigger_count=1,
-                        )
-                        session = MonitorSession(spec=spec)
-                        monitor_runner = ThreadedMonitorRunner(
-                            stream=ChannelValueStream(
-                                logger=runtime.publisher,
-                                channel=settings.selected_channel,
-                            ),
-                            session=session,
-                        )
-                        monitor_runner.start()
-                        st.session_state.monitor_runner = monitor_runner
-                        st.rerun()
+                st.session_state.monitor_runner = action_toggle_automation(
+                    state=state,
+                    monitor_runner=monitor_runner,
+                    service=service,
+                    runtime=runtime,
+                    settings=settings,
+                    operation=op,
+                )
+                st.rerun()
             st.caption(ready_reason or "Automation can be armed.")
             st.caption(f"Input: {selected_channel.label}")
             st.caption(f"Threshold: {settings.threshold:.6g} {selected_channel.unit}")
@@ -495,33 +321,8 @@ def main() -> None:
                     s2.metric("State", status.state_number.name)
                     s3, s4 = st.columns(2)
                     s3.metric("Config", status.config_mode.name)
-                    s4.metric("Alarm Count", sum(
-                        [
-                            status.pressure_alarm,
-                            status.oil_alarm,
-                            status.water_flow_alarm,
-                            status.water_temp_alarm,
-                            status.helium_temp_alarm,
-                            status.phase_alarm,
-                            status.motor_temp_alarm,
-                        ]
-                    ))
-
-                    alarms = []
-                    if status.pressure_alarm:
-                        alarms.append("Pressure")
-                    if status.oil_alarm:
-                        alarms.append("Oil")
-                    if status.water_flow_alarm:
-                        alarms.append("Water Flow")
-                    if status.water_temp_alarm:
-                        alarms.append("Water Temp")
-                    if status.helium_temp_alarm:
-                        alarms.append("Helium Temp")
-                    if status.phase_alarm:
-                        alarms.append("Phase/Fuse")
-                    if status.motor_temp_alarm:
-                        alarms.append("Motor Temp")
+                    alarms = get_active_alarm_names(status)
+                    s4.metric("Alarm Count", len(alarms))
                     st.write("Active alarms:", ", ".join(alarms) if alarms else "None")
                 except Exception as exc:
                     st.warning(f"F70 status read failed: {exc}")
