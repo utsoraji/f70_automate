@@ -25,6 +25,7 @@ class AutomationSettings:
     required_sample_count: int = 3
     cooldown_sec: float = 3.0
     operation_name: str = ""
+    notification_enabled: bool = False
 
     def __post_init__(self) -> None:
         if not self.channels:

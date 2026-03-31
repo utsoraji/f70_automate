@@ -17,6 +17,7 @@ from f70_automate.domains.automation.settings import (
 )
 from f70_automate.domains.automation.adapters import (
     ChannelValueStream,
+    NotifyingOperationTrigger,
     OperationExecutorLike,
     OperationTrigger,
     PhysicalSamplePublisherLike,
@@ -30,6 +31,7 @@ __all__ = [
     "MonitorSpec",
     "MonitorSession",
     "MonitorSnapshot",
+    "NotifyingOperationTrigger",
     "OperationExecutorLike",
     "OperationTrigger",
     "PhysicalSamplePublisherLike",

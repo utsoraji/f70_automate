@@ -1,6 +1,9 @@
 import asyncio
 from types import TracebackType
-from typing import Callable, Concatenate, ParamSpec, Protocol, TypeVar
+from typing import TYPE_CHECKING, Callable, Concatenate, ParamSpec, Protocol, TypeVar
+
+if TYPE_CHECKING:
+	from f70_automate._core.logging.protocols import Logger
 
 class SerialPortLike(Protocol):
 	"""
@@ -32,12 +35,13 @@ class _Command[R]:
 		return self._func(ser, *self._args, **self._kwargs)
 
 class SerialAsyncManager[R]:
-	def __init__(self, ser: SerialPortLike, default_timeout: float = 10.0) -> None:
+	def __init__(self, ser: SerialPortLike, default_timeout: float = 10.0, logger: "Logger | None" = None) -> None:
 		self._ser: SerialPortLike = ser
 		self._queue: asyncio.Queue[tuple[_Command[R], asyncio.Future[R]]] = asyncio.Queue()
 		self._stop_event = asyncio.Event()
 		self._worker_task = None
 		self.default_timeout = default_timeout
+		self._logger = logger
 
 	async def __aenter__(self) -> "SerialAsyncManager":
 		"""async with 開始時にワーカーを自動起動"""
@@ -50,7 +54,8 @@ class SerialAsyncManager[R]:
 
 	async def _worker(self) -> None:
 		"""唯一シリアルポートを操作するタスク"""
-		print("Worker: Started")
+		if self._logger:
+			self._logger.info("Worker: Started", source="SerialAsync")
 		try:
 			while True:
 				if self._stop_event.is_set() and self._queue.empty():
@@ -72,12 +77,14 @@ class SerialAsyncManager[R]:
 					self._queue.task_done()
 
 		except asyncio.CancelledError:
-			print("Worker: Cancelled")
+			if self._logger:
+				self._logger.warning("Worker: Cancelled", source="SerialAsync")
 		finally:
 			# 確実なクローズ
 			if self._ser and self._ser.is_open:
 				self._ser.close()
-				print("Worker: Serial port closed.")
+				if self._logger:
+					self._logger.info("Worker: Serial port closed.", source="SerialAsync")
 
 	async def run_task(
 		self,

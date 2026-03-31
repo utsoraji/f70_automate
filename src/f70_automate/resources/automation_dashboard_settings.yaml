@@ -1,0 +1,22 @@
+app:
+  automation:
+    settings:
+      selected_channel_key: ch_pressure
+      thresholds_by_channel_key:
+        ch_pressure: 0.1
+      required_sample_count: 3
+      cooldown_sec: 3.0
+      operation_name: no_op
+      notification_enabled: true
+  notification:
+    settings:
+      failure_policy: best_effort
+      slack_bot:
+        enabled: true
+        channel_id: C054Z5MNWBY
+        channel_name: ''
+        mention_user_ids:
+        - U03BDPLLUS3
+        token_env_key: F70_SLACK_BOT_TOKEN
+        periodic_message_enabled: false
+        periodic_message_interval_min: 30

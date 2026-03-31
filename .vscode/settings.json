@@ -1,5 +1,6 @@
 {
     "chat.tools.terminal.autoApprove": {
-        ".\\.venv\\Scripts\\python.exe": true
+        ".\\.venv\\Scripts\\python.exe": true,
+        "c:/Users/Soraji/Documents/projects/f70_automate/.venv/Scripts/python.exe": true
     }
 }

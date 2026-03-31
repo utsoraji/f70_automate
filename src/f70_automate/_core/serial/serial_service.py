@@ -6,6 +6,7 @@ from typing import Any, Callable, Concatenate, ParamSpec, Protocol, TypeVar
 import serial
 
 from f70_automate._core.serial import serial_async, SerialPortLike
+from f70_automate._core.logging.app_logger import get_app_logger
 
 P = ParamSpec("P")
 R = TypeVar("R", covariant=True)
@@ -47,7 +48,7 @@ class SerialService:
         else:
             self._loop_ready.set()
 
-        self._actor = serial_async.SerialAsyncManager(self._port, default_timeout=default_timeout)
+        self._actor = serial_async.SerialAsyncManager(self._port, default_timeout=default_timeout, logger=get_app_logger())
         try:
             asyncio.run_coroutine_threadsafe(self._actor.start(), self._loop).result(timeout=self._startup_timeout)
         except FutureTimeoutError as exc:
@@ -127,11 +128,6 @@ class SerialService:
     __call__ = call
 
     def call_checked(self, operation: CallableWithCanExecute[P,R], *a: P.args, **kw: P.kwargs) -> R:
-        if not callable(operation):
-            raise TypeError("operation must be callable.")
-        if not hasattr(operation, "can_execute"):
-            raise TypeError("operation must implement can_execute(ser).")
-
         def _checked_runner(ser: SerialPortLike, operation: CallableWithCanExecute, *args: P.args, **kwargs: P.kwargs) -> R:
             if not operation.can_execute(ser):
                 op_name = getattr(operation, "name", repr(operation))

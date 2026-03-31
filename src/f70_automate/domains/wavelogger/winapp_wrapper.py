@@ -5,6 +5,8 @@ import pythoncom
 from enum import IntEnum
 from typing import Optional, List, Tuple
 
+from f70_automate._core.logging import get_app_logger
+
 # --- 列挙型定義 ---
 class LoggerState(IntEnum):
 	IDLE = 1
@@ -69,7 +71,7 @@ class DeviceConnector:
 		self._app = app_obj
 
 	def setup_usb(self, device_id: int):
-		print(f"Setting USB Identifier to {device_id}")
+		get_app_logger().info(f"Setting USB Identifier to {device_id}", source="WaveLogger")
 		res = self._app.SetIdentifier(device_id)
 		if res != 0: raise WaveLoggerError("USB識別子の設定に失敗しました", res)
 

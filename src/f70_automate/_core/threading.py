@@ -81,8 +81,7 @@ class ThreadRunner(ABC):
 
     def is_alive(self) -> bool:
         """Check if the background thread is currently running."""
-        with self._lock:
-            return self._thread.is_alive()
+        return self._thread.is_alive()
 
     @property
     def daemon(self) -> bool:

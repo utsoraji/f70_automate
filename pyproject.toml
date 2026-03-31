@@ -10,6 +10,8 @@ dependencies = [
     "streamlit",
     "pyserial",
     "PyYAML",
+    "python-dotenv",
+    "slack_sdk",
 ]
 
 [tool.setuptools.packages.find]

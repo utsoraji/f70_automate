@@ -4,6 +4,7 @@ from typing import Callable, ParamSpec, TypeVar, Concatenate
 
 from f70_automate._core.serial import SerialPortLike
 from f70_automate._core.serial.serial_service import CallableWithCanExecute
+from f70_automate._core.logging import get_app_logger
 from f70_automate.domains.f70_serial import f70_serial as f70
 
 
@@ -201,7 +202,7 @@ reset = F70Operation(
 )
 
 def no_op_impl(ser: SerialPortLike) -> None:
-    print("Executing no_op - this does nothing.")
+    get_app_logger().debug("Executing no_op - this does nothing.", source="F70Operation")
 
 no_op = F70Operation(
     name="no_op",
