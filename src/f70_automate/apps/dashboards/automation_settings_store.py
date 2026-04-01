@@ -9,6 +9,9 @@ from f70_automate.domains.notification import NotificationSettings
 from f70_automate.domains.wavelogger import ChannelConfig
 
 DEFAULT_SETTINGS_PATH = Path("src/f70_automate/resources/automation_dashboard_settings.yaml")
+DEFAULT_SERIAL_PORT = "COM3"
+DEFAULT_SERIAL_BAUDRATE = 9600
+DEFAULT_USE_MOCK_DEVICES = True
 
 
 class DashboardSettingsError(ValueError):
@@ -106,16 +109,45 @@ def _notification_to_dict(settings: NotificationSettings) -> dict[str, Any]:
     }
 
 
+def _extract_serial_settings(payload: dict[str, Any]) -> tuple[str, int, bool]:
+    app_node = payload.get("app", {})
+    if not isinstance(app_node, dict):
+        return DEFAULT_SERIAL_PORT, DEFAULT_SERIAL_BAUDRATE, DEFAULT_USE_MOCK_DEVICES
+
+    app_settings_node = app_node.get("settings", {})
+    if isinstance(app_settings_node, dict):
+        use_mock_devices = bool(app_settings_node.get("use_mock_devices", DEFAULT_USE_MOCK_DEVICES))
+    else:
+        use_mock_devices = DEFAULT_USE_MOCK_DEVICES
+
+    serial_node = app_node.get("serial", {})
+    if not isinstance(serial_node, dict):
+        return DEFAULT_SERIAL_PORT, DEFAULT_SERIAL_BAUDRATE, use_mock_devices
+
+    settings_node = serial_node.get("settings", {})
+    if not isinstance(settings_node, dict):
+        return DEFAULT_SERIAL_PORT, DEFAULT_SERIAL_BAUDRATE, use_mock_devices
+
+    return (
+        str(settings_node["port"]),
+        int(settings_node["baudrate"]),
+        use_mock_devices,
+    )
+
+
 def load_dashboard_settings(
     *,
     channels: tuple[ChannelConfig, ...],
     default_operation_name: str,
     path: Path = DEFAULT_SETTINGS_PATH,
-) -> tuple[AutomationSettings, NotificationSettings]:
+) -> tuple[AutomationSettings, NotificationSettings, str, int, bool]:
     if not path.exists():
         return (
             AutomationSettings(channels=channels, operation_name=default_operation_name),
             NotificationSettings(),
+            DEFAULT_SERIAL_PORT,
+            DEFAULT_SERIAL_BAUDRATE,
+            DEFAULT_USE_MOCK_DEVICES,
         )
 
     try:
@@ -129,6 +161,7 @@ def load_dashboard_settings(
                 default_operation_name=default_operation_name,
             ),
             _to_notification_settings(notification_node),
+            *_extract_serial_settings(payload),
         )
     except (ConfigError, ValueError, KeyError, TypeError) as exc:
         raise DashboardSettingsError(f"Failed to load dashboard settings: {exc}") from exc
@@ -139,14 +172,26 @@ def save_dashboard_settings(
     path: Path,
     settings: AutomationSettings,
     notification_settings: NotificationSettings,
+    serial_port: str,
+    serial_baudrate: int,
+    use_mock_devices: bool,
 ) -> None:
     payload: dict[str, Any] = {
         "app": {
+            "settings": {
+                "use_mock_devices": use_mock_devices,
+            },
             "automation": {
                 "settings": _automation_to_dict(settings),
             },
             "notification": {
                 "settings": _notification_to_dict(notification_settings),
+            },
+            "serial": {
+                "settings": {
+                    "port": serial_port,
+                    "baudrate": serial_baudrate,
+                }
             },
         }
     }

@@ -27,6 +27,8 @@ def _parse_csv(value: str) -> tuple[str, ...]:
 def render_settings_panel(
     *,
     use_mock: bool,
+    serial_port: str,
+    serial_baudrate: int,
     settings: AutomationSettings,
     notification_settings: NotificationSettings,
     automation_operations: tuple[F70Operation, ...],
@@ -40,15 +42,14 @@ def render_settings_panel(
         with tab_automation:
             top_row1, top_row2, top_row3 = st.columns(3)
             with top_row1:
-                default_port = "MOCK" if use_mock else "COM3"
-                port = st.text_input("F70 COM Port", value=default_port, disabled=use_mock)
+                port = st.text_input("F70 COM Port", value=serial_port, disabled=use_mock)
             with top_row2:
                 baudrate = int(
                     st.number_input(
                         "Baudrate",
                         min_value=1200,
                         max_value=115200,
-                        value=9600,
+                        value=int(serial_baudrate),
                         step=1200,
                     )
                 )

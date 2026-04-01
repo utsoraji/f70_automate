@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 import unittest
+import yaml
 
 from f70_automate.apps.dashboards.automation_settings_store import (
+    DashboardSettingsError,
     load_dashboard_settings,
     save_dashboard_settings,
 )
@@ -37,7 +39,7 @@ class TestAutomationSettingsStore(unittest.TestCase):
             self.path.unlink()
 
     def test_load_returns_defaults_when_file_missing(self) -> None:
-        settings, notification_settings = load_dashboard_settings(
+        settings, notification_settings, serial_port, serial_baudrate, use_mock_devices = load_dashboard_settings(
             channels=self.channels,
             default_operation_name="no_op",
             path=self.path,
@@ -46,6 +48,9 @@ class TestAutomationSettingsStore(unittest.TestCase):
         self.assertIsInstance(settings, AutomationSettings)
         self.assertIsInstance(notification_settings, NotificationSettings)
         self.assertEqual(settings.operation_name, "no_op")
+        self.assertEqual(serial_port, "COM3")
+        self.assertEqual(serial_baudrate, 9600)
+        self.assertTrue(use_mock_devices)
 
     def test_round_trip_save_and_load(self) -> None:
         settings = AutomationSettings(
@@ -69,8 +74,17 @@ class TestAutomationSettingsStore(unittest.TestCase):
             path=self.path,
             settings=settings,
             notification_settings=notification_settings,
+            serial_port="COM9",
+            serial_baudrate=19200,
+            use_mock_devices=False,
         )
-        loaded_settings, loaded_notification_settings = load_dashboard_settings(
+        (
+            loaded_settings,
+            loaded_notification_settings,
+            loaded_serial_port,
+            loaded_serial_baudrate,
+            loaded_use_mock_devices,
+        ) = load_dashboard_settings(
             channels=self.channels,
             default_operation_name="no_op",
             path=self.path,
@@ -102,6 +116,51 @@ class TestAutomationSettingsStore(unittest.TestCase):
             loaded_notification_settings.slack_bot.periodic_message_interval_min,
             45,
         )
+        self.assertEqual(loaded_serial_port, "COM9")
+        self.assertEqual(loaded_serial_baudrate, 19200)
+        self.assertFalse(loaded_use_mock_devices)
+
+        payload = yaml.safe_load(self.path.read_text(encoding="utf-8"))
+        self.assertFalse(payload["app"]["settings"]["use_mock_devices"])
+        self.assertNotIn("use_mock_devices", payload["app"]["serial"]["settings"])
+
+    def test_load_raises_when_baudrate_missing(self) -> None:
+                invalid_text = """
+app:
+    settings:
+        use_mock_devices: true
+    automation:
+        settings:
+            selected_channel_key: ch_pressure
+            thresholds_by_channel_key:
+                ch_pressure: 0.1
+            required_sample_count: 3
+            cooldown_sec: 3.0
+            operation_name: no_op
+            notification_enabled: false
+    notification:
+        settings:
+            failure_policy: best_effort
+            slack_bot:
+                enabled: false
+                channel_id: ''
+                channel_name: ''
+                mention_user_ids: []
+                token_env_key: F70_SLACK_BOT_TOKEN
+                periodic_message_enabled: false
+                periodic_message_interval_min: 30
+    serial:
+        settings:
+            port: COM5
+"""
+                self.path.write_text(invalid_text, encoding="utf-8")
+
+                with self.assertRaises(DashboardSettingsError):
+                        load_dashboard_settings(
+                                channels=self.channels,
+                                default_operation_name="no_op",
+                                path=self.path,
+                        )
 
 
 if __name__ == "__main__":

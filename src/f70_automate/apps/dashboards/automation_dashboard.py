@@ -115,6 +115,9 @@ def main() -> None:
     st.session_state.setdefault("monitor_runner", None)
     st.session_state.setdefault("periodic_runner", None)
     st.session_state.setdefault("last_mode", None)
+    st.session_state.setdefault("serial_port", "COM3")
+    st.session_state.setdefault("serial_baudrate", 9600)
+    st.session_state.setdefault("use_mock_devices", True)
     st.session_state.setdefault("settings_bootstrapped", False)
     st.session_state.setdefault("trace_window_label", "5 min")
     if "log_subscriber" not in st.session_state:
@@ -124,6 +127,9 @@ def main() -> None:
     state = cast(DashboardState, st.session_state.dashboard_state)
     settings = cast(AutomationSettings, st.session_state.automation_settings)
     notification_settings = cast(NotificationSettings, st.session_state.notification_settings)
+    serial_port = cast(str, st.session_state.serial_port)
+    serial_baudrate = int(st.session_state.serial_baudrate)
+    use_mock = bool(st.session_state.use_mock_devices)
     monitor_runner = cast(ThreadedMonitorRunner | None, st.session_state.monitor_runner)
     periodic_runner = cast(PeriodicNotificationRunner | None, st.session_state.periodic_runner)
     monitor_snapshot = get_monitor_snapshot(monitor_runner)
@@ -137,14 +143,20 @@ def main() -> None:
 
     if not cast(bool, st.session_state.settings_bootstrapped):
         try:
-            loaded_settings, loaded_notification_settings = load_dashboard_settings(
+            loaded_settings, loaded_notification_settings, loaded_serial_port, loaded_serial_baudrate, loaded_use_mock = load_dashboard_settings(
                 channels=WAVELOGGER_CHANNELS,
                 default_operation_name=AUTOMATION_OPERATIONS[0].name,
             )
             st.session_state.automation_settings = loaded_settings
             st.session_state.notification_settings = loaded_notification_settings
+            st.session_state.serial_port = loaded_serial_port
+            st.session_state.serial_baudrate = loaded_serial_baudrate
+            st.session_state.use_mock_devices = loaded_use_mock
             settings = loaded_settings
             notification_settings = loaded_notification_settings
+            serial_port = loaded_serial_port
+            serial_baudrate = loaded_serial_baudrate
+            use_mock = loaded_use_mock
         except Exception as exc:
             state.last_error = str(exc)
         st.session_state.settings_bootstrapped = True
@@ -155,7 +167,8 @@ def main() -> None:
         with st.container(border=True):
             col_mode1, col_mode2 = st.columns((1, 3))
             with col_mode1:
-                use_mock = st.toggle("Use Mock Devices", value=True)
+                use_mock = st.toggle("Use Mock Devices", value=use_mock)
+                st.session_state.use_mock_devices = use_mock
             with col_mode2:
                 st.caption("Mock mode uses in-process fake F70 and WaveLogger devices.")
 
@@ -166,12 +179,15 @@ def main() -> None:
             with c_io1:
                 if st.button("Load Settings", width="stretch", disabled=monitor_snapshot.is_running):
                     try:
-                        loaded_settings, loaded_notification_settings = load_dashboard_settings(
+                        loaded_settings, loaded_notification_settings, loaded_serial_port, loaded_serial_baudrate, loaded_use_mock = load_dashboard_settings(
                             channels=WAVELOGGER_CHANNELS,
                             default_operation_name=AUTOMATION_OPERATIONS[0].name,
                         )
                         st.session_state.automation_settings = loaded_settings
                         st.session_state.notification_settings = loaded_notification_settings
+                        st.session_state.serial_port = loaded_serial_port
+                        st.session_state.serial_baudrate = loaded_serial_baudrate
+                        st.session_state.use_mock_devices = loaded_use_mock
                         st.session_state.settings_bootstrapped = True
                         get_app_logger().info(f"Settings loaded from {DEFAULT_SETTINGS_PATH}")
                         st.rerun()
@@ -184,6 +200,9 @@ def main() -> None:
                             path=DEFAULT_SETTINGS_PATH,
                             settings=settings,
                             notification_settings=notification_settings,
+                            serial_port=serial_port,
+                            serial_baudrate=serial_baudrate,
+                            use_mock_devices=use_mock,
                         )
                         get_app_logger().info(f"Settings saved to {DEFAULT_SETTINGS_PATH}")
                     except Exception as exc:
@@ -191,12 +210,18 @@ def main() -> None:
 
         port, baudrate, op = render_settings_panel(
             use_mock=use_mock,
+            serial_port=serial_port,
+            serial_baudrate=serial_baudrate,
             settings=settings,
             notification_settings=notification_settings,
             automation_operations=AUTOMATION_OPERATIONS,
             wavelogger_channels=WAVELOGGER_CHANNELS,
             monitor_running=monitor_snapshot.is_running,
         )
+        st.session_state.serial_port = port
+        st.session_state.serial_baudrate = int(baudrate)
+        serial_port = port
+        serial_baudrate = int(baudrate)
 
     selected_channel = settings.selected_channel
 

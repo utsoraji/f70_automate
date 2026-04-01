@@ -1,4 +1,6 @@
 app:
+  settings:
+    use_mock_devices: true
   automation:
     settings:
       selected_channel_key: ch_pressure
@@ -20,3 +22,7 @@ app:
         token_env_key: F70_SLACK_BOT_TOKEN
         periodic_message_enabled: false
         periodic_message_interval_min: 30
+  serial:
+    settings:
+      port: COM3
+      baudrate: 9600
