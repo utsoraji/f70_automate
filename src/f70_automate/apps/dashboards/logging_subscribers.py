@@ -86,7 +86,7 @@ class StreamlitConsoleSubscriber(LogSubscriber):
         """
         return "\n".join(self._lines)
 
-    def render_to_streamlit(self, container = None) -> None:
+    def render_to_streamlit(self, container = None, clear_button_key: str = "log_console_clear") -> None:
         """Streamlit コンテナにコンソール風で出力
 
         Args:
@@ -96,7 +96,7 @@ class StreamlitConsoleSubscriber(LogSubscriber):
         if container is None:
             container = st
 
-        if container.button("Clear", key="log_console_clear"):
+        if container.button("Clear", key=clear_button_key):
             self.clear_buffer()
 
         log_text = escape(self.get_buffer_str())

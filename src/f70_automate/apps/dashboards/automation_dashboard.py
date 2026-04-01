@@ -30,6 +30,7 @@ from f70_automate.apps.dashboards.automation_settings_store import (
     load_dashboard_settings,
     save_dashboard_settings,
 )
+from f70_automate.apps.dashboards.f70_command_console_component import render_f70_command_console_component
 from f70_automate._core.config import load_dotenv_file
 from f70_automate._core.logging import get_app_logger
 from f70_automate.apps.dashboards.logging_subscribers import StreamlitConsoleSubscriber
@@ -148,7 +149,7 @@ def main() -> None:
             state.last_error = str(exc)
         st.session_state.settings_bootstrapped = True
 
-    tab_settings, tab_dashboard = st.tabs(["⚙️ Settings", "📊 Dashboard"])
+    tab_settings, tab_dashboard, tab_f70_command = st.tabs(["⚙️ Settings", "📊 Dashboard", "⌨️ F70 Command"])
 
     with tab_settings:
         with st.container(border=True):
@@ -449,9 +450,19 @@ def main() -> None:
                 st.subheader("Log Console")
                 log_sub = cast(StreamlitConsoleSubscriber, st.session_state.get("log_subscriber"))
                 if log_sub is not None:
-                    log_sub.render_to_streamlit()
+                    log_sub.render_to_streamlit(clear_button_key="automation_log_console_clear")
 
         live_view()
+
+    with tab_f70_command:
+        render_f70_command_console_component(
+            service=service,
+            mode_label="Mock" if use_mock else "Hardware",
+            port=port,
+            baudrate=int(baudrate),
+            key_prefix="f70_console_dashboard",
+            disable_control_commands=monitor_snapshot.is_running,
+        )
 
 
 if __name__ == "__main__":
